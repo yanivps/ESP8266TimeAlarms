@@ -18,12 +18,12 @@
               - this fixes bug in repeating weekly alarms - thanks to Vincent Valdy and draythomp for testing
 */
 
-#include "TimeAlarms.h"
+#include "ESP8266TimeAlarms.h"
 
 #define IS_ONESHOT  true   // constants used in arguments to create method
 #define IS_REPEAT   false
-
-
+   
+   
 //**************************************************************
 //* Alarm Class Constructor
 
@@ -42,29 +42,30 @@ AlarmClass::AlarmClass()
 void AlarmClass::updateNextTrigger()
 {
   if (Mode.isEnabled) {
-    time_t time = now();
-    if (dtIsAlarm(Mode.alarmType) && nextTrigger <= time) {
+    time_t now = time(nullptr);
+    
+    if (dtIsAlarm(Mode.alarmType) && nextTrigger <= now) {
       // update alarm if next trigger is not yet in the future
       if (Mode.alarmType == dtExplicitAlarm) {
         // is the value a specific date and time in the future
         nextTrigger = value;  // yes, trigger on this value
       } else if (Mode.alarmType == dtDailyAlarm) {
         //if this is a daily alarm
-        if (value + previousMidnight(now()) <= time) {
+        if (value + previousMidnight(now) <= now) {
           // if time has passed then set for tomorrow
-          nextTrigger = value + nextMidnight(time);
+          nextTrigger = value + nextMidnight(now);
         } else {
           // set the date to today and add the time given in value
-          nextTrigger = value + previousMidnight(time);
+          nextTrigger = value + previousMidnight(now);
         }
       } else if (Mode.alarmType == dtWeeklyAlarm) {
         // if this is a weekly alarm
-        if ((value + previousSunday(now())) <= time) {
+        if ((value + previousSunday(now)) <= now) {
           // if day has passed then set for the next week.
-          nextTrigger = value + nextSunday(time);
+          nextTrigger = value + nextSunday(now);
         } else {
           // set the date to this week today and add the time given in value
-          nextTrigger = value + previousSunday(time);
+          nextTrigger = value + previousSunday(now);
         }
       } else {
         // its not a recognized alarm type - this should not happen
@@ -73,7 +74,7 @@ void AlarmClass::updateNextTrigger()
     }
     if (Mode.alarmType == dtTimer) {
       // its a timer
-      nextTrigger = time + value;  // add the value to previous time (this ensures delay always at least Value seconds)
+      nextTrigger = now + value;  // add the value to previous time (this ensures delay always at least Value seconds)
     }
   }
 }
@@ -212,11 +213,13 @@ void TimeAlarmsClass::waitForRollover( dtUnits_t Units)
 
 uint8_t TimeAlarmsClass::getDigitsNow( dtUnits_t Units)
 {
-  time_t time = now();
-  if (Units == dtSecond) return numberOfSeconds(time);
-  if (Units == dtMinute) return numberOfMinutes(time);
-  if (Units == dtHour) return numberOfHours(time);
-  if (Units == dtDay) return dayOfWeek(time);
+  time_t now = time(nullptr);
+  struct tm *NOW = localtime(&now);
+  
+  if (Units == dtSecond) return NOW->tm_sec;
+  if (Units == dtMinute) return NOW->tm_min;
+  if (Units == dtHour) return NOW->tm_hour;
+  if (Units == dtDay) return NOW->tm_wday;
   return 255;  // This should never happen
 }
 
@@ -232,9 +235,10 @@ bool TimeAlarmsClass::getIsServicing()
 void TimeAlarmsClass::serviceAlarms()
 {
   if (!isServicing) {
+  time_t now = time(nullptr);
     isServicing = true;
     for (servicedAlarmId = 0; servicedAlarmId < dtNBR_ALARMS; servicedAlarmId++) {
-      if (Alarm[servicedAlarmId].Mode.isEnabled && (now() >= Alarm[servicedAlarmId].nextTrigger)) {
+      if (Alarm[servicedAlarmId].Mode.isEnabled && (now >= Alarm[servicedAlarmId].nextTrigger)) {
         OnTick_t TickHandler = Alarm[servicedAlarmId].onTickHandler;
         if (Alarm[servicedAlarmId].Mode.isOneShot) {
           free(servicedAlarmId);  // free the ID if mode is OnShot
@@ -242,7 +246,7 @@ void TimeAlarmsClass::serviceAlarms()
           Alarm[servicedAlarmId].updateNextTrigger();
         }
         if (TickHandler != NULL) {
-          (*TickHandler)();     // call the handler
+          TickHandler();     // call the handler
         }
       }
     }
@@ -268,7 +272,8 @@ time_t TimeAlarmsClass::getNextTrigger()
 // attempt to create an alarm and return true if successful
 AlarmID_t TimeAlarmsClass::create(time_t value, OnTick_t onTickHandler, uint8_t isOneShot, dtAlarmPeriod_t alarmType)
 {
-  if ( ! ( (dtIsAlarm(alarmType) && now() < SECS_PER_YEAR) || (dtUseAbsoluteValue(alarmType) && (value == 0)) ) ) {
+  time_t now = time(nullptr);
+  if ( ! ( (dtIsAlarm(alarmType) && now < SECS_PER_YEAR) || (dtUseAbsoluteValue(alarmType) && (value == 0)) ) ) {
     // only create alarm ids if the time is at least Jan 1 1971
     for (uint8_t id = 0; id < dtNBR_ALARMS; id++) {
       if (Alarm[id].Mode.alarmType == dtNotAllocated) {

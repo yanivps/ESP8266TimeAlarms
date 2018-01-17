@@ -4,7 +4,7 @@
 #define TimeAlarms_h
 
 #include <Arduino.h>
-#include "TimeLib.h"
+#include <time.h>
 
 #if !defined(dtNBR_ALARMS )
 #if defined(__AVR__)
@@ -17,6 +17,40 @@
 #endif
 
 #define USE_SPECIALIST_METHODS  // define this for testing
+typedef enum {
+    dowInvalid, dowSunday, dowMonday, dowTuesday, dowWednesday, dowThursday, dowFriday, dowSaturday
+} timeDayOfWeek_t;
+#define SECS_PER_MIN  ((time_t)(60UL))
+#define SECS_PER_HOUR ((time_t)(3600UL))
+#define SECS_PER_DAY  ((time_t)(SECS_PER_HOUR * 24UL))
+#define DAYS_PER_WEEK ((time_t)(7UL))
+#define SECS_PER_WEEK ((time_t)(SECS_PER_DAY * DAYS_PER_WEEK))
+
+#define SECS_PER_YEAR ((time_t)(SECS_PER_DAY * 365UL)) // TODO: ought to handle leap years
+
+#define secs_per_year(y) ((time_t)(SECS_PER_DAY * year_lengths[isleap(y)]))
+#define isleap(y) ((((y) % 4) == 0 && ((y) % 100) != 0) || ((y) % 400) == 0)
+
+/* Useful Macros for getting elapsed time */
+#define numberOfSeconds(_time_) (_time_ % SECS_PER_MIN)  
+#define numberOfMinutes(_time_) ((_time_ / SECS_PER_MIN) % SECS_PER_MIN) 
+#define numberOfHours(_time_) (( _time_% SECS_PER_DAY) / SECS_PER_HOUR)
+#define dayOfWeek(_time_)  ((( _time_ / SECS_PER_DAY + 4)  % DAYS_PER_WEEK)+1) // 1 = Sunday
+#define elapsedDays(_time_) ( _time_ / SECS_PER_DAY)  // this is number of days since Jan 1 1970
+#define elapsedSecsToday(_time_)  (_time_ % SECS_PER_DAY)   // the number of seconds since last midnight 
+// The following macros are used in calculating alarms and assume the clock is set to a date later than Jan 1 1971
+// Always set the correct time before settting alarms
+#define previousMidnight(_time_) (( _time_ / SECS_PER_DAY) * SECS_PER_DAY)  // time at the start of the given day
+#define nextMidnight(_time_) ( previousMidnight(_time_)  + SECS_PER_DAY )   // time at the end of the given day 
+#define elapsedSecsThisWeek(_time_)  (elapsedSecsToday(_time_) +  ((dayOfWeek(_time_)-1) * SECS_PER_DAY) )   // note that week starts on day 1
+#define previousSunday(_time_)  (_time_ - elapsedSecsThisWeek(_time_))      // time at the start of the week for the given time
+#define nextSunday(_time_) ( previousSunday(_time_)+SECS_PER_WEEK)          // time at the end of the week for the given time
+
+static const int year_lengths[2] = {
+  365,
+  366
+} ;
+
 
 typedef enum {
   dtMillisecond,
@@ -54,9 +88,17 @@ typedef AlarmID_t AlarmId;  // Arduino friendly name
 
 #define dtINVALID_ALARM_ID 255
 #define dtINVALID_TIME     (time_t)(-1)
-#define AlarmHMS(_hr_, _min_, _sec_) (_hr_ * SECS_PER_HOUR + _min_ * SECS_PER_MIN + _sec_)
+//#define AlarmHMS(_hr_, _min_, _sec_) (_hr_ * SECS_PER_HOUR + _min_ * SECS_PER_MIN + _sec_)
+//Hack to get timezone and stuff working
 
+
+
+#ifdef ARDUINO_ARCH_ESP8266
+#include <functional>
+typedef std::function<void()> OnTick_t;
+#else
 typedef void (*OnTick_t)();  // alarm callback function typedef
+#endif
 
 // class defining an alarm instance, only used by dtAlarmsClass
 class AlarmClass
@@ -82,6 +124,18 @@ private:
 
 public:
   TimeAlarmsClass();
+//Translate Alarm time from localtime in to epochtime this will handle timezone things
+  int AlarmHMS(int H, int M, int S) {
+    time_t t1,t2;	
+    struct tm tma;
+    time(&t1);
+    localtime_r(&t1, &tma);
+    tma.tm_hour = H;
+    tma.tm_min = M;
+    tma.tm_sec = S;
+    t2 = mktime(&tma);
+    return t2-previousMidnight(t1);
+}
   // functions to create alarms and timers
 
   // trigger once at the given time in the future
@@ -139,6 +193,7 @@ public:
   AlarmID_t timerRepeat(const int H,  const int M,  const int S, OnTick_t onTickHandler) {
     return timerRepeat(AlarmHMS(H,M,S), onTickHandler);
   }
+
 
   void delay(unsigned long ms);
 
