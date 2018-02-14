@@ -1,7 +1,6 @@
 TimeAlarms for ESP arduino version 2.4.0 using newlibc time
 
-The Alarm library is a companion to the Time library that makes it easy to 
-perform tasks at specific times or after specific intervals.
+The ESP8266TimeAlarm is no longer dependen on the Time library
 
 Tasks scheduled at a particular time of day are called Alarms,
 tasks scheduled after an interval of time has elapsed are called Timers.
