@@ -18,8 +18,16 @@
 
 #define USE_SPECIALIST_METHODS  // define this for testing
 typedef enum {
-    dowInvalid, dowSunday, dowMonday, dowTuesday, dowWednesday, dowThursday, dowFriday, dowSaturday
-} timeDayOfWeek_t;
+    dowInvalid = 0,
+    dowSunday = 1 << 0,
+    dowMonday = 1 << 1,
+    dowTuesday = 1 << 2,
+    dowWednesday = 1 << 3,
+    dowThursday = 1 << 4,
+    dowFriday = 1 << 5,
+    dowSaturday = 1 << 6
+}
+ timeDayOfWeek_t;
 #define SECS_PER_MIN  ((time_t)(60UL))
 #define SECS_PER_HOUR ((time_t)(3600UL))
 #define SECS_PER_DAY  ((time_t)(SECS_PER_HOUR * 24UL))
@@ -31,19 +39,43 @@ typedef enum {
 #define secs_per_year(y) ((time_t)(SECS_PER_DAY * year_lengths[isleap(y)]))
 #define isleap(y) ((((y) % 4) == 0 && ((y) % 100) != 0) || ((y) % 400) == 0)
 
+inline time_t getLocalTimeFromTime(time_t _time) {
+  struct tm _tma;
+  localtime_r(&_time, &_tma);
+  time_t _localtime = mktime(&_tma);
+  return _localtime;
+}
+
+// Get index of an enabled day flag in the timeDayOfWeek_t enum starting from startFromDayIndex
+// Sunday index is 0, Saturday index is 6
+inline uint8_t getNextEnabledDayOfWeekIndex(timeDayOfWeek_t e, uint8_t startFromDayIndex) {
+  for (uint8_t i = startFromDayIndex; i < 7; i++) {
+    if (e & (1 << i)) {
+      return i;
+    }
+  }
+  // if we didn't find enabled day when starting from startFromDayIndex, start again from zero
+  for (uint8_t i = 0; i < 7; i++) {
+    if (e & (1 << i)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 /* Useful Macros for getting elapsed time */
-#define numberOfSeconds(_time_) (_time_ % SECS_PER_MIN)  
-#define numberOfMinutes(_time_) ((_time_ / SECS_PER_MIN) % SECS_PER_MIN) 
-#define numberOfHours(_time_) (( _time_% SECS_PER_DAY) / SECS_PER_HOUR)
-#define dayOfWeek(_time_)  ((( _time_ / SECS_PER_DAY + 4)  % DAYS_PER_WEEK)+1) // 1 = Sunday
-#define elapsedDays(_time_) ( _time_ / SECS_PER_DAY)  // this is number of days since Jan 1 1970
-#define elapsedSecsToday(_time_)  (_time_ % SECS_PER_DAY)   // the number of seconds since last midnight 
+#define numberOfSeconds(_time_) (getLocalTimeFromTime(_time_) % SECS_PER_MIN)
+#define numberOfMinutes(_time_) ((getLocalTimeFromTime(_time_) / SECS_PER_MIN) % SECS_PER_MIN)
+#define numberOfHours(_time_) (( getLocalTimeFromTime(_time_) % SECS_PER_DAY) / SECS_PER_HOUR)
+#define dayOfWeek(_time_)  ((( getLocalTimeFromTime(_time_) / SECS_PER_DAY + 4)  % DAYS_PER_WEEK)+1) // 1 = Sunday
+#define elapsedDays(_time_) ( getLocalTimeFromTime(_time_) / SECS_PER_DAY)  // this is number of days since Jan 1 1970
+#define elapsedSecsToday(_time_)  (getLocalTimeFromTime(_time_) % SECS_PER_DAY)   // the number of seconds since last midnight
 // The following macros are used in calculating alarms and assume the clock is set to a date later than Jan 1 1971
 // Always set the correct time before settting alarms
-#define previousMidnight(_time_) (( _time_ / SECS_PER_DAY) * SECS_PER_DAY)  // time at the start of the given day
-#define nextMidnight(_time_) ( previousMidnight(_time_)  + SECS_PER_DAY )   // time at the end of the given day 
+#define previousMidnight(_time_) (( getLocalTimeFromTime(_time_) / SECS_PER_DAY) * SECS_PER_DAY)  // time at the start of the given day
+#define nextMidnight(_time_) ( previousMidnight(_time_)  + SECS_PER_DAY )   // time at the end of the given day
 #define elapsedSecsThisWeek(_time_)  (elapsedSecsToday(_time_) +  ((dayOfWeek(_time_)-1) * SECS_PER_DAY) )   // note that week starts on day 1
-#define previousSunday(_time_)  (_time_ - elapsedSecsThisWeek(_time_))      // time at the start of the week for the given time
+#define previousSunday(_time_)  (getLocalTimeFromTime(_time_) - elapsedSecsThisWeek(_time_))      // time at the start of the week for the given time
 #define nextSunday(_time_) ( previousSunday(_time_)+SECS_PER_WEEK)          // time at the end of the week for the given time
 
 static const int year_lengths[2] = {
@@ -110,6 +142,7 @@ public:
   time_t value;
   time_t nextTrigger;
   AlarmMode_t Mode;
+  timeDayOfWeek_t dayOfWeek;
 };
 
 // class containing the collection of alarms
@@ -120,13 +153,14 @@ private:
   void serviceAlarms();
   uint8_t isServicing;
   uint8_t servicedAlarmId; // the alarm currently being serviced
-  AlarmID_t create(time_t value, OnTick_t onTickHandler, uint8_t isOneShot, dtAlarmPeriod_t alarmType);
+  AlarmID_t create(time_t value, OnTick_t onTickHandler, uint8_t isOneShot, dtAlarmPeriod_t alarmType, timeDayOfWeek_t dayOfWeek = dowInvalid);
+  time_t getNextEnabledDayOfWeekInSecondsFromPreviousSunday(timeDayOfWeek_t dayOfWeek, const int H, const int M, const int S);
 
 public:
   TimeAlarmsClass();
 //Translate Alarm time from localtime in to epochtime this will handle timezone things
   int AlarmHMS(int H, int M, int S) {
-    time_t t1,t2;	
+    time_t t1,t2;
     struct tm tma;
     time(&t1);
     localtime_r(&t1, &tma);
@@ -135,7 +169,7 @@ public:
     tma.tm_sec = S;
     t2 = mktime(&tma);
     return t2-previousMidnight(t1);
-}
+  }
   // functions to create alarms and timers
 
   // trigger once at the given time in the future
@@ -146,7 +180,7 @@ public:
 
   // trigger once at given time of day
   AlarmID_t alarmOnce(time_t value, OnTick_t onTickHandler) {
-    if (value <= 0 || value > SECS_PER_DAY) return dtINVALID_ALARM_ID;
+    if (value < 0 || value > SECS_PER_DAY) return dtINVALID_ALARM_ID;
     return create(value, onTickHandler, true, dtDailyAlarm);
   }
   AlarmID_t alarmOnce(const int H, const int M, const int S, OnTick_t onTickHandler) {
@@ -155,9 +189,9 @@ public:
 
   // trigger once on a given day and time
   AlarmID_t alarmOnce(const timeDayOfWeek_t DOW, const int H, const int M, const int S, OnTick_t onTickHandler) {
-    time_t value = (DOW-1) * SECS_PER_DAY + AlarmHMS(H,M,S);
-    if (value <= 0) return dtINVALID_ALARM_ID;
-    return create(value, onTickHandler, true, dtWeeklyAlarm);
+    time_t value = getNextEnabledDayOfWeekInSecondsFromPreviousSunday(DOW, H, M, S);
+    if (value < 0) return dtINVALID_ALARM_ID;
+    return create(value, onTickHandler, true, dtWeeklyAlarm), DOW;
   }
 
   // trigger daily at given time of day
@@ -171,9 +205,9 @@ public:
 
   // trigger weekly at a specific day and time
   AlarmID_t alarmRepeat(const timeDayOfWeek_t DOW, const int H, const int M, const int S, OnTick_t onTickHandler) {
-    time_t value = (DOW-1) * SECS_PER_DAY + AlarmHMS(H,M,S);
-    if (value <= 0) return dtINVALID_ALARM_ID;
-    return create(value, onTickHandler, false, dtWeeklyAlarm);
+    time_t value = getNextEnabledDayOfWeekInSecondsFromPreviousSunday(DOW, H, M, S);
+    if (value < 0) return dtINVALID_ALARM_ID;
+    return create(value, onTickHandler, false, dtWeeklyAlarm, DOW);
   }
 
   // trigger once after the given number of seconds

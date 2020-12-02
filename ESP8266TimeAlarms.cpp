@@ -22,8 +22,8 @@
 
 #define IS_ONESHOT  true   // constants used in arguments to create method
 #define IS_REPEAT   false
-   
-   
+
+
 //**************************************************************
 //* Alarm Class Constructor
 
@@ -43,7 +43,7 @@ void AlarmClass::updateNextTrigger()
 {
   if (Mode.isEnabled) {
     time_t now = time(nullptr);
-    
+
     if (dtIsAlarm(Mode.alarmType) && nextTrigger <= now) {
       // update alarm if next trigger is not yet in the future
       if (Mode.alarmType == dtExplicitAlarm) {
@@ -67,6 +67,11 @@ void AlarmClass::updateNextTrigger()
           // set the date to this week today and add the time given in value
           nextTrigger = value + previousSunday(now);
         }
+        // After setting nextTrigger, we need to change value to be next enabled day of week plus its time in the day
+        uint8_t currentDayOfWeekIndexInValue = value / SECS_PER_DAY;
+        uint8_t nextEnabledDayOfWeekIndex = getNextEnabledDayOfWeekIndex(dayOfWeek, currentDayOfWeekIndexInValue + 1);
+        value -= currentDayOfWeekIndexInValue * SECS_PER_DAY;
+        value += nextEnabledDayOfWeekIndex * SECS_PER_DAY;
       } else {
         // its not a recognized alarm type - this should not happen
         Mode.isEnabled = false;  // Disable the alarm
@@ -215,7 +220,7 @@ uint8_t TimeAlarmsClass::getDigitsNow( dtUnits_t Units)
 {
   time_t now = time(nullptr);
   struct tm *NOW = localtime(&now);
-  
+
   if (Units == dtSecond) return NOW->tm_sec;
   if (Units == dtMinute) return NOW->tm_min;
   if (Units == dtHour) return NOW->tm_hour;
@@ -270,7 +275,7 @@ time_t TimeAlarmsClass::getNextTrigger()
 }
 
 // attempt to create an alarm and return true if successful
-AlarmID_t TimeAlarmsClass::create(time_t value, OnTick_t onTickHandler, uint8_t isOneShot, dtAlarmPeriod_t alarmType)
+AlarmID_t TimeAlarmsClass::create(time_t value, OnTick_t onTickHandler, uint8_t isOneShot, dtAlarmPeriod_t alarmType, timeDayOfWeek_t dayOfWeek)
 {
   time_t now = time(nullptr);
   if ( ! ( (dtIsAlarm(alarmType) && now < SECS_PER_YEAR) || (dtUseAbsoluteValue(alarmType) && (value == 0)) ) ) {
@@ -282,12 +287,29 @@ AlarmID_t TimeAlarmsClass::create(time_t value, OnTick_t onTickHandler, uint8_t 
         Alarm[id].Mode.isOneShot = isOneShot;
         Alarm[id].Mode.alarmType = alarmType;
         Alarm[id].value = value;
+        Alarm[id].dayOfWeek = dayOfWeek;
         enable(id);
         return id;  // alarm created ok
       }
     }
   }
   return dtINVALID_ALARM_ID; // no IDs available or time is invalid
+}
+
+// Returns the amount of seconds since last sunday up to the closest time
+// (H, M, S) in the closest day of dayOfWeek which occurres in the future
+time_t TimeAlarmsClass::getNextEnabledDayOfWeekInSecondsFromPreviousSunday(timeDayOfWeek_t dayOfWeek, const int H, const int M, const int S) {
+  time_t now = time(nullptr);
+  uint8_t nowDayOfWeek = dayOfWeek(now) - 1; // reduce 1 so Sunday will be index 0;
+  uint8_t dayOfWeekIndex = getNextEnabledDayOfWeekIndex(dayOfWeek, nowDayOfWeek);
+  time_t value = dayOfWeekIndex * SECS_PER_DAY + AlarmHMS(H,M,S);
+  if ((previousSunday(now) + value) < now) {
+    // If today's day is included in dayOfWeek flags and H,M,S time has already passed today
+    // use the next day in dayOfWeek for the alarm value
+    dayOfWeekIndex = getNextEnabledDayOfWeekIndex(dayOfWeek, nowDayOfWeek + 1);
+    value = dayOfWeekIndex * SECS_PER_DAY + AlarmHMS(H,M,S);
+  }
+  return value;
 }
 
 // make one instance for the user to use
